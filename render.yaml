@@ -3,7 +3,7 @@ services:
     name: autowhatsapp-bridge
     runtime: docker
     dockerfilePath: ./bridge/Dockerfile
-    plan: starter
+    plan: 0.5c-512mb
     region: frankfurt
     healthCheckPath: /health
     numInstances: 1
@@ -20,3 +20,4 @@ services:
         sync: false
       - key: ENABLE_LIVE_SEND
         value: "false"
+

@@ -1,20 +1,20 @@
 # Personal WhatsApp QR service
 
-The owner's requested connection is a personal WhatsApp linked by QR, using whatsapp-web.js. This is an unofficial client, not the official Meta Business API. It can disconnect or face WhatsApp account restrictions. https://wwebjs.dev/guide/ explains this limitation.
+The owner's requested connection is a personal WhatsApp linked by QR, using Baileys. This is an unofficial client, not the official Meta Business API. It can disconnect or face WhatsApp account restrictions. https://github.com/WhiskeySockets/Baileys explains this limitation.
 
 ## Current state
 
 The website and service code are prepared. The always-on bridge has NOT been deployed and no WhatsApp account has been linked. No real messages have been sent. Live sending defaults to false.
 
-The Supabase migration request for the new connection table and separate Web queue routing expired twice at the required approval step. The unapplied SQL is in `supabase/pending/personal_whatsapp_bridge.sql`. Review/approve and apply it before running this service, then record the server-generated migration version locally. Do not start a bridge against the old queue schema.
+The Supabase connection-table and Web queue migration has now been approved and applied. The earlier approval prompts expired; that blocker is resolved. Render hosting still requires approval of the reviewed deployment plan and recurring cost.
 
-The service dependencies installed and syntax checks pass. npm audit reports 16 transitive advisories (11 high, 5 moderate) through whatsapp-web.js's Puppeteer/archive dependencies. These must be assessed and resolved before enabling production sending. No automatic force downgrade or breaking dependency overrides were made. The frontend is independent of these dependencies. A real Chromium session, QR pairing, restart restoration and delivery acknowledgements are not yet tested.
+The bridge now uses a pinned Baileys WebSocket adapter instead of Chromium. The replacement dependency tree installed with zero npm audit findings. Adapter tests verify Hebrew text, file bytes and names, recipient resolution, unknown results and session path confinement. No browser sandbox is disabled, and no browser needs to be installed. Real QR pairing, restart restoration and delivery acknowledgements remain pending hosting approval.
 
 ## Host requirements
 
 Deploy a single always-on Linux service using `bridge/Dockerfile`, built from the repository root. A Docker-compatible VPS or Render with a persistent disk is needed. GitHub Pages hosts the website; Supabase Edge Functions cannot maintain this browser session. Do not deploy on a sleeping free service or ephemeral filesystem.
 
-`render.yaml` is a proposed configuration, not a created/billed service. Confirm current plan and disk costs before provisioning. Attach a persistent writable disk at `/data`, accessible to the non-root node user. The service expects Chromium sandbox support; it intentionally does not launch the browser with `--no-sandbox`. Confirm that the chosen host supports Chromium's sandbox. Use a suitable sandbox-capable runtime instead of disabling it without review.
+`render.yaml` is a proposed configuration, not a created/billed service. Confirm current plan and disk costs before provisioning. Attach a persistent writable disk at `/data`, accessible to the non-root node user. The socket service does not need Chromium. It stores only its linked-device authentication state on the persistent disk.
 
 Environment values (configure in host secrets, never in the website or repository):
 
@@ -22,7 +22,6 @@ Environment values (configure in host secrets, never in the website or repositor
 - `SUPABASE_SECRET_KEY`: a server-only Supabase secret key for this project.
 - `AW_OWNER_ID`: the owner's Supabase **app Auth user ID**, shown in Authentication → Users after first signing in to AutoWhatsApp. It is not the Supabase dashboard user's ID.
 - `SESSION_PATH=/data/whatsapp`.
-- `CHROME_PATH=/usr/bin/chromium` (already set by Docker).
 - `ENABLE_LIVE_SEND=false` until the owner approves a specific test recipient and message.
 - `PORT=10000`.
 

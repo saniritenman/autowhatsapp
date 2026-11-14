@@ -1,10 +1,10 @@
 import {createClient} from '@supabase/supabase-js';
-import pkg from 'whatsapp-web.js';
+import {WhatsAppSession,Media as MessageMedia} from './session.mjs';
 import QRCode from 'qrcode';
 import {createServer} from 'node:http';
 import {randomUUID} from 'node:crypto';
 import {createDispatcher} from '../supabase/functions/dispatch/core.ts';
-const {Client,LocalAuth,MessageMedia}=pkg;
+
 const required=['SUPABASE_URL','SUPABASE_SECRET_KEY','AW_OWNER_ID'];
 for(const k of required)if(!process.env[k])throw Error(`Missing ${k}`);
 const owner=process.env.AW_OWNER_ID, instance=randomUUID();
@@ -17,7 +17,7 @@ async function lease(){return await checked(db.rpc('aw_web_lease',{account:owner
 async function start(){
  if(client)return;
  await status({status:'starting',qr_data:null,qr_expires_at:null});
- client=new Client({authStrategy:new LocalAuth({clientId:owner,dataPath:process.env.SESSION_PATH||'./.wa-session'}),puppeteer:{headless:true,executablePath:process.env.CHROME_PATH||undefined,args:['--disable-dev-shm-usage']}});
+ client=new WhatsAppSession(process.env.SESSION_PATH||'./.wa-session',owner);
  client.on('qr',async value=>{ready=false;try{await status({status:'qr',qr_data:await QRCode.toDataURL(value,{width:320,margin:4}),qr_expires_at:new Date(Date.now()+45000).toISOString(),phone:null})}catch{console.error('Could not persist QR state')}});
  client.on('authenticated',()=>status({status:'starting',qr_data:null,qr_expires_at:null}).catch(()=>{}));
  client.on('ready',()=>{ready=true;status({status:'ready',qr_data:null,qr_expires_at:null,phone:client.info?.wid?.user||null}).catch(()=>{})});

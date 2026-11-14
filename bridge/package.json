@@ -1,1 +1,13 @@
-{"name":"autowhatsapp-web-bridge","private":true,"type":"module","scripts":{"start":"node --experimental-strip-types index.mjs"},"dependencies":{"whatsapp-web.js":"1.34.8","qrcode":"1.5.4"}}
+{
+  "name": "autowhatsapp-web-bridge",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node --experimental-strip-types index.mjs",
+    "test": "node --test session.test.mjs"
+  },
+  "dependencies": {
+    "qrcode": "1.5.4",
+    "@whiskeysockets/baileys": "6.7.24"
+  }
+}
