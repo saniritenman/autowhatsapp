@@ -38,3 +38,10 @@ Live UI verification: Hebrew switching and RTL were checked on desktop and at a 
 
 
 Render preparation update: The workspace was confirmed as My Workspace. The service now uses Baileys 6.7.24 over WebSockets and no Chromium, with zero npm audit findings at installation. All sixteen app tests and five socket adapter tests pass. The pending Supabase migration succeeded; the connection records and separate transport queues are installed. Render resources have not been created or billed. The proposed smallest always-on service is 0.5c-512mb ($7/month) plus a 1 GB persistent disk ($0.25/month), excluding tax and usage charges. Live sending remains disabled.
+
+## Render planning result
+
+Blueprint draft ID: exs-dbs6osm7bikc73eonisg. Workspace: My Workspace (tea-dbs4vae7bikc73ek3f5g). Source is pushed to main; autoSync is disabled. Planning failed with need_payment_info on the new service, so there is no approved plan, deployed service or hosting charge from this action. Add payment details through the Render dashboard, then re-plan this existing Blueprint instead of creating a duplicate. Review the result and obtain approval to apply the plan and recurring estimated $7.25/month cost before provisioning. Do not approve a failed plan.
+
+The Supabase migration is recorded locally and remotely as 20261114140419_personal_whatsapp_bridge. Transactional live-database tests passed for QR isolation, owner connect requests, exclusive account leases and Cloud/Web queue routing; all synthetic users and test records were rolled back. No app Auth user exists yet, so the owner must first sign in to AutoWhatsApp before AW_OWNER_ID can be configured. Configure SUPABASE_SECRET_KEY securely on Render, not in source or chat. Live sending stays false.
+
