@@ -1,5 +1,5 @@
 import {nextOccurrence,occurrence} from '../_shared/schedule.js';
-export function createDispatcher(db:any,env:(s:string)=>string,fetch:any){
+export function createDispatcher(db:any,env:(s:string)=>string,fetch:any,provider:any=null){
 async function checked(p:any){const r=await p;if(r.error)throw r.error;return r.data;}
 const update=(table:string,id:string,data:any)=>checked(db.from(table).update(data).eq('id',id));
 function mediaType(mime:string){return mime.startsWith('image/')?'image':mime.startsWith('video/')?'video':mime.startsWith('audio/')?'audio':'document'}
@@ -14,20 +14,22 @@ async function media(s:any){
 }
 async function dispatch(){
  if(env('ENABLE_LIVE_SEND')!=='true')return {disabled:true};
- for(const key of ['META_API_VERSION','META_PHONE_NUMBER_ID','META_ACCESS_TOKEN'])if(!env(key))throw Error('Missing '+key);
- const claimed=await checked(db.rpc('aw_claim'));let sent=0;
+ if(!provider)for(const key of ['META_API_VERSION','META_PHONE_NUMBER_ID','META_ACCESS_TOKEN'])if(!env(key))throw Error('Missing '+key);
+ const claimed=await checked(provider?db.rpc('aw_claim_web',{account:provider.ownerId}):db.rpc('aw_claim'));let sent=0;
  for(const job of claimed){
   const s=job.payload;let inFlight=false;
   try{
    const current=await checked(db.from('aw_schedules').select('state,next_at').eq('id',s.id).single());
    if(current.state!=='active'||Date.parse(current.next_at)!==Date.parse(job.scheduled_at)){await update('aw_jobs',job.id,{status:'cancelled'});continue;}
+   if(provider && (s.transport!=='web'||s.owner_id!==provider.ownerId))throw Error('Wrong WhatsApp account or transport.');
+   if(provider && s.mode==='template')throw Error('Templates require the Business Cloud API.');
    if(!s.consent)throw Error('Recipient permission is missing.');
    occurrence(s.local_time,s.timezone);
-   if(s.mode!=='template'){
+   if(!provider && s.mode!=='template'){
     const w=await checked(db.from('aw_windows').select('last_inbound').eq('phone',s.phone).maybeSingle());
     if(!w||Date.now()-Date.parse(w.last_inbound)>=86400000)throw Error('The 24-hour reply window is closed. Use an approved template.');
    }
-   const attachment=await media(s);const payloads:any[]=[];
+   const attachment=await (provider?provider.media(s):media(s));const payloads:any[]=[];
    if(s.mode==='template'){
     if(attachment?.kind==='audio')throw Error('Audio template headers are unsupported.');
     const components:any[]=[];
@@ -46,7 +48,7 @@ async function dispatch(){
     if(p.status==='accepted')continue;
     if(p.status!=='queued')throw Error('Message part requires manual review.');
     await update('aw_parts',p.id,{status:'sending'});inFlight=true;
-    const r=await fetch(`https://graph.facebook.com/${env('META_API_VERSION')}/${env('META_PHONE_NUMBER_ID')}/messages`,{method:'POST',headers:{Authorization:`Bearer ${env('META_ACCESS_TOKEN')}`,'Content-Type':'application/json'},body:JSON.stringify({messaging_product:'whatsapp',recipient_type:'individual',to:s.phone.slice(1),biz_opaque_callback_data:p.id,...payloads[i]}),signal:AbortSignal.timeout(30000)});
+    const r=provider ? await provider.send(s.phone,payloads[i],p.id) : await fetch(`https://graph.facebook.com/${env('META_API_VERSION')}/${env('META_PHONE_NUMBER_ID')}/messages`,{method:'POST',headers:{Authorization:`Bearer ${env('META_ACCESS_TOKEN')}`,'Content-Type':'application/json'},body:JSON.stringify({messaging_product:'whatsapp',recipient_type:'individual',to:s.phone.slice(1),biz_opaque_callback_data:p.id,...payloads[i]}),signal:AbortSignal.timeout(30000)});
     const body=await r.json();
     if(!r.ok){
      // 5xx outcomes can be ambiguous. Never auto-replay them.

@@ -27,3 +27,9 @@ Supabase's dashboard reports that this organization exceeded its quota in the pr
 Security advisors identify intentionally inaccessible internal event/window tables, and the narrow aw_retry definer RPC. That RPC checks caller ownership and definite failure status; other worker RPCs are service-role only.
 
 The migration filenames match the deployed migration history. The cron migration targets this project's URL. A previously registered Sites shell remains unpublished; the active deployment is GitHub Pages.
+
+## Hebrew, iPhone and desktop update
+
+The interface now offers English/עברית with persisted language preference, RTL layout, localized form/status text, Hebrew dates and direction-aware message editing. Stored message bodies, phone numbers and template language codes are never translated. Safari users can add the website to their iPhone Home Screen. A web manifest and responsive touch controls are included; there is no offline-send or offline-cache promise. Desktop and mobile access use the same Supabase account.
+
+The new personal WhatsApp QR service is documented in bridge/README.md. It is prepared but NOT connected or deployed. The required Supabase connection-table migration remains unapplied because the tool's approval expired. Render authorization, hosting-cost approval, server secrets, dependency review and real QR pairing remain outstanding. Official Cloud API sending remains disabled too.

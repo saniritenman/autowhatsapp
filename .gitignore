@@ -5,3 +5,6 @@ dist/
 .openai/*.zip
 
 preview.png
+
+**/.wa-session/
+**/.wwebjs_cache/
