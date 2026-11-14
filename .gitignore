@@ -8,3 +8,6 @@ preview.png
 
 **/.wa-session/
 **/.wwebjs_cache/
+
+preview*.png
+publish-bundle.json
