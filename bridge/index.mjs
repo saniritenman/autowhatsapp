@@ -1,14 +1,18 @@
 import {createClient} from '@supabase/supabase-js';
 import {WhatsAppSession,Media as MessageMedia} from './session.mjs';
 import QRCode from 'qrcode';
+import {createLocalDatabase} from './local-db.mjs';
 import {createServer} from 'node:http';
 import {randomUUID} from 'node:crypto';
 import {createDispatcher} from '../supabase/functions/dispatch/core.ts';
 
-const required=['SUPABASE_URL','SUPABASE_SECRET_KEY','AW_OWNER_ID'];
+const local=!!process.env.AW_COMPUTER_TOKEN;
+const required=local?['SUPABASE_URL','SUPABASE_PUBLISHABLE_KEY']:['SUPABASE_URL','SUPABASE_SECRET_KEY','AW_OWNER_ID'];
 for(const k of required)if(!process.env[k])throw Error(`Missing ${k}`);
-const owner=process.env.AW_OWNER_ID, instance=randomUUID();
-const db=createClient(process.env.SUPABASE_URL,process.env.SUPABASE_SECRET_KEY,{auth:{persistSession:false,autoRefreshToken:false}});
+const db=local?createLocalDatabase(process.env.SUPABASE_URL,process.env.SUPABASE_PUBLISHABLE_KEY,process.env.AW_COMPUTER_TOKEN):createClient(process.env.SUPABASE_URL,process.env.SUPABASE_SECRET_KEY,{auth:{persistSession:false,autoRefreshToken:false}});
+const identity=local?await db.identity():null;
+if(identity?.error)throw Error(identity.error.message);
+const owner=local?identity.data:process.env.AW_OWNER_ID, instance=randomUUID();
 const live=process.env.ENABLE_LIVE_SEND==='true';
 let client,ready=false,busy=false,stopping=false,heartbeat=0;
 async function checked(query){const r=await query;if(r.error)throw r.error;return r.data;}
@@ -55,7 +59,7 @@ async function tick(){if(busy||stopping)return;busy=true;try{
 const interval=setInterval(tick,10000);
 const leaseTimer=setInterval(async()=>{if(stopping)return;try{if(!await lease()){await shutdown();process.exitCode=1;return}heartbeat=Date.now();await status({})}catch{await shutdown();process.exitCode=1}},20000);
 // Health endpoint exposes neither QR codes, credentials, phone number nor sessions.
-const server=createServer((req,res)=>{if(req.url!=='/health'){res.writeHead(404);res.end();return}res.writeHead(Date.now()-heartbeat<90000?200:503,{'Content-Type':'application/json'});res.end(JSON.stringify({healthy:Date.now()-heartbeat<90000}))}).listen(Number(process.env.PORT||10000),'0.0.0.0');
+const server=createServer((req,res)=>{if(req.url!=='/health'){res.writeHead(404);res.end();return}res.writeHead(Date.now()-heartbeat<90000?200:503,{'Content-Type':'application/json'});res.end(JSON.stringify({healthy:Date.now()-heartbeat<90000}))}).listen(Number(process.env.PORT||10000),local?'127.0.0.1':'0.0.0.0');
 async function shutdown(){if(stopping)return;stopping=true;clearInterval(interval);clearInterval(leaseTimer);await stop(false).catch(()=>{});await checked(db.from('aw_connections').update({lease_until:new Date().toISOString()}).eq('owner_id',owner).eq('instance_id',instance)).catch(()=>{});server.close();}
 process.on('SIGTERM',()=>shutdown().then(()=>process.exit()));process.on('SIGINT',()=>shutdown().then(()=>process.exit()));
-if(await lease()){heartbeat=Date.now();await start().catch(()=>console.error('Browser initialization failed. Check Chromium and persistent disk settings.'));await tick()}else{console.error('Only one bridge instance per account is supported.');await shutdown();process.exitCode=1;}
+if(await lease()){heartbeat=Date.now();await start().catch(()=>console.error('WhatsApp initialization failed. Check internet connectivity and session storage.'));await tick()}else{console.error('Only one bridge instance per account is supported.');await shutdown();process.exitCode=1;}

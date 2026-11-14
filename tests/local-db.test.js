@@ -1,0 +1,6 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {createLocalDatabase} from '../bridge/local-db.mjs';
+test('PC database adapter sends pairing token in headers, not URL or body',async()=>{let seen;const db=createLocalDatabase('https://project.test','public-key','private-code',async(url,options)=>{seen={url,options};return Response.json({data:'owner'})});assert.equal((await db.identity()).data,'owner');assert.equal(seen.url,'https://project.test/functions/v1/local-gateway');assert.equal(seen.options.headers['x-aw-computer-token'],'private-code');assert.ok(!seen.options.body.includes('private-code'))});
+test('PC adapter preserves query ownership filters',async()=>{let body;const db=createLocalDatabase('https://project.test','public','code',async(_,options)=>{body=JSON.parse(options.body);return Response.json({data:{id:'part'}})});await db.from('aw_parts').select('*').eq('job_id','job').eq('ordinal',0).single();assert.deepEqual(body.filters,{job_id:'job',ordinal:0});assert.equal(body.single,true)});
+test('revoked computer pairing surfaces a useful failure',async()=>{const db=createLocalDatabase('https://project.test','public','code',async()=>new Response('',{status:401}));assert.match((await db.identity()).error.message,/expired or revoked/)});

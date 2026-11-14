@@ -73,3 +73,7 @@ Sources:
 `npm test` exercises actual recurrence logic and the dispatch core with a mocked database/provider: one-time scheduling, weekly DST, weekdays/end dates, invalid zones, gaps, custom intervals, cancellation, the disabled switch, provider acceptance, accepted-part deduplication, rate-limit retry, rejection and uncertain transport failure. `npm run build` builds the production frontend.
 
 Database migrations, real RLS enforcement, concurrent SQL claims, Supabase Auth/email, Storage, cron execution, Meta onboarding and signed production webhooks need staging verification after credentials are supplied. Unit mocks do not prove those services are configured. There is no live sending or working cloud persistence until these deployment steps are completed.
+
+## Free PC connection
+
+Use [FREE-PC.md](FREE-PC.md) and double-click Start-Free.cmd. No paid hosting is needed; your PC must remain awake and online for sending. The cloud site remains accessible from iPhone and PC.

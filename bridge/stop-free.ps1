@@ -1,0 +1,2 @@
+$awPidPath=Join-Path $PSScriptRoot '.local/worker.pid'
+if(Test-Path -LiteralPath $awPidPath){$awWorkerId=[int](Get-Content -LiteralPath $awPidPath);$awWorker=Get-CimInstance Win32_Process -Filter ('ProcessId='+$awWorkerId) -ErrorAction SilentlyContinue;if($awWorker -and $awWorker.CommandLine -like '*AutoWhatsApp*bridge*index.mjs*'){Stop-Process -Id $awWorkerId;Write-Host 'Free PC connection stopped. WhatsApp session is retained for next time.'}else{Write-Host 'Worker is not running.'};Remove-Item -LiteralPath $awPidPath}
