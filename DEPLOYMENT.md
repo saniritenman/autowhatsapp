@@ -1,28 +1,29 @@
-# Deployment status — November 14, 2026
+# AutoWhatsApp deployment
 
-AutoWhatsApp is independent of BottleTrack. No BottleTrack resources were modified.
+Website: https://saniritenman.github.io/autowhatsapp/
+Repository: https://github.com/saniritenman/autowhatsapp
+Backend: https://supabase.com/dashboard/project/cdvnclwqpcgulrxwvbwa
 
-## Completed
+This is a separate GitHub repository, GitHub Pages website and Supabase project. BottleTrack remains unchanged.
 
-- Supabase organization: saniritenman's Org (`wxdwpfpimankipaupdbk`), explicitly confirmed by owner.
-- New project: AutoWhatsApp (`cdvnclwqpcgulrxwvbwa`), Frankfurt (`eu-central-1`).
-- Dashboard: https://supabase.com/dashboard/project/cdvnclwqpcgulrxwvbwa
-- Separate tables, private Storage bucket, RLS policies and queue functions deployed.
-- `dispatch` and `webhook` deployed as active Edge Functions.
-- Server cron `autowhatsapp-dispatch` active every minute, authenticated with a secret generated and retained in Vault. Worker validates that secret through a service-role-only RPC. No secret is stored in source.
-- Observed cron HTTP 200 response `{"disabled":true}`. Live sending is off; no Meta credentials configured and no real messages sent.
-- Transactional database test verified cross-user contact reads and forged ownership writes are blocked, and the owner can read their own contact. Test data rolled back.
-- Security advisors: internal event/window tables intentionally have RLS with no user policies. The authenticated `aw_retry` definer warning is expected: this narrow RPC explicitly checks caller ownership, active schedule and definite failed status before changing jobs. Other worker RPCs are service-role-only.
-- Public frontend settings stored in ignored `.env.local`; build passes. Eleven mocked/unit tests pass.
+## Verified November 14, 2026
 
-## Awaiting GitHub browser sign-in
+- GitHub Actions build, eleven tests and Pages deployment all succeeded (run 43592916255).
+- Live website renders, composer opens and the review step displays the selected recipient, message and scheduled time. Review test was discarded without saving or sending.
+- Supabase Auth Site URL and the exact redirect allowlist point to the new website.
+- Private tables, storage bucket, queue and both Edge Functions are deployed.
+- Cron runs every minute with an authenticated Vault token; verified HTTP 200 response shows disabled=true.
+- Transactional RLS tests passed for own-contact access, cross-user read denial and forged-owner write denial. Test data rolled back.
+- Frontend configuration uses a public publishable key. Service-role, Meta and cron secrets are absent from client/source.
 
-GitHub connector authenticated as saniritenman, with access to bottletrack. It has no repository creation operation. The GitHub creation page is open in the browser at https://github.com/new and is showing sign-in. No AutoWhatsApp repository exists yet.
+## Still required before sending
 
-After sign-in: create separate autowhatsapp repo, publish only this workspace, configure GitHub Pages, set public Supabase build variables, then set Supabase Auth site/redirect URLs to the new Pages URL. The previous unused Sites registration is unpublished and is not the GitHub deployment.
+Connect a Meta WhatsApp Business number and configure the Meta token, app secret, verification token and API version in Supabase Edge Function secrets. Complete the webhook subscription and template approval. Keep live sending disabled until the owner approves a specific sandbox test recipient/message. No real WhatsApp messages have been sent.
 
-## Remaining provider setup
+Email sign-in is configured but has not been completed end-to-end by the owner. Cross-device user workflow and attachment upload should be checked after their first sign-in.
 
-Meta business onboarding, phone-number eligibility/coexistence, access token, app secret, verify token, template approval, payment configuration and webhook subscription. Keep ENABLE_LIVE_SEND false until an explicitly approved sandbox recipient/message test. No secrets should be pasted into chat or committed.
+Supabase's dashboard reports that this organization exceeded its quota in the previous billing cycle and projects may be restricted from November 23, 2026 if the overage remains. Review usage: https://supabase.com/dashboard/org/wxdwpfpimankipaupdbk/usage . No paid upgrade was made.
 
-The source migration history now matches the deployed Supabase versions. The cron migration targets this separate project's URL; adapt it before creating any other environment.
+Security advisors identify intentionally inaccessible internal event/window tables, and the narrow aw_retry definer RPC. That RPC checks caller ownership and definite failure status; other worker RPCs are service-role only.
+
+The migration filenames match the deployed migration history. The cron migration targets this project's URL. A previously registered Sites shell remains unpublished; the active deployment is GitHub Pages.
