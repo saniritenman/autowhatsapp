@@ -1,79 +1,53 @@
-# AutoWhatsApp
+# AutoWhatsApp — Remember. Open. Send.
 
-Current deployment progress and remaining steps: [DEPLOYMENT.md](DEPLOYMENT.md).
+A private, mobile-friendly message preparation app in English and Hebrew. Hosted at https://saniritenman.github.io/autowhatsapp/ using GitHub Pages and the independent AutoWhatsApp Supabase project. BottleTrack is separate.
 
-A React/Vite interface with Supabase Auth, private Postgres records and Storage, and a durable server-side WhatsApp Cloud API queue.
+## Current behavior
 
-## What was found
+1. Sign in with a secure email link. Email is used for authentication, not message reminders.
+2. Prepare a contact number, text, and up to five JPEG/PNG/PDF/MP4/MP3 files (16 MB each).
+3. Select the reminder time, timezone, optional recurrence (daily, weekly, selected weekdays), end date, and popup notification timing.
+4. Review and save to Google Calendar. Google authorization is requested when needed. A draft remains safely saved if Calendar fails, with an explicit retry action. Draft-only saving never claims to create a Calendar reminder.
+5. Google Calendar sends the notification even when the website and PC are closed. The event links back to the private draft.
+6. Open WhatsApp with the prepared text and recipient; press Send yourself. Photos use the device's share sheet (choose WhatsApp and a recipient) or download/manual attachment. Standard WhatsApp links cannot attach files to a preselected chat. Some share targets omit text; Copy text is available.
+7. Mark the reminder as sent manually. This is your acknowledgement, not a delivery receipt. Editing updates the Calendar event; cancelling deletes it. Recurring completion records your acknowledgement while retaining the recurrence.
 
-The empty AutoWhatsApp workspace had no existing code. The nearby `C:/Users/User/Desktop/Bana-App/bottletrack-github-ready` project is **BottleTrack**, using React 18, Vite, GitHub Pages and Supabase. Its README explicitly describes a public inventory with **no sign-in**. Only an empty `.env.example` was present. Its source and database were not changed. The owner confirmed that this is the reference app, and clarified that AutoWhatsApp must be an entirely independent project.
+No WhatsApp automation, personal session/QR bridge, business API, background worker, or paid Render service is required. The legacy automatic sender is retired in the database. Its source is preserved at branch `archive/automatic-sender-2026-11-20`.
 
-This app reuses only that technology stack and the owner’s GitHub/Supabase accounts. It requires its own GitHub repository, website URL and separate Supabase project. It adds isolated `aw_*` tables, a private `autowhatsapp` bucket, and Supabase Auth instead of inheriting BottleTrack's public inventory permissions. Supabase and GitHub were subsequently connected through authorized integrations. The separate backend and website are now deployed; see DEPLOYMENT.md for verified state and remaining Meta configuration.
+## Setup status
 
-## Local development
+- Implemented: application, private Supabase reminders/files, email login, manual WhatsApp link, native file sharing with fallback, recurrence payloads, Calendar API retry/update/cancel, Hebrew RTL, responsive layout.
+- **External setup required:** Google OAuth web client ID and Calendar API activation. Without this, draft saving and manual WhatsApp preparation work, but automatic Calendar event creation is disabled. See [GOOGLE-CALENDAR-SETUP.md](GOOGLE-CALENDAR-SETUP.md).
+- Calendar API tested with mocks only; no real event or WhatsApp message was sent. iPhone sharing and notification delivery require validation on an actual device/account.
 
-Node 22.18+ recommended (tests directly load TypeScript). Run `npm ci`, `npm test`, `npm run dev`. Copy `.env.example` to `.env.local` and fill the **public** Supabase URL and publishable key. Run `npm run build` for `dist/`. Never put a service-role key or Meta token in `VITE_*` values.
+## Development and deployment
 
-Without Supabase configuration the app displays an empty preview workspace. Forms and review work, but saving is blocked with an explicit setup message. It does not fabricate contacts, delivery history or a successful connection.
+Node 24 recommended. Run `npm ci`, `npm test`, `npm run build`. `npm run dev` starts a local site. Build is in `dist`, deployed by `.github/workflows/pages.yml` on a main-branch push. Pages source must be GitHub Actions.
 
-## Deployment: independent GitHub repository and Supabase project
+`src/config.json` holds the Supabase URL, publishable public key, and Google **public client ID**. Never add service-role keys, Google client secrets, personal WhatsApp sessions, or OAuth tokens to source. For local OAuth configuration, use `.env.local` with `VITE_GOOGLE_CLIENT_ID`; it is ignored. The GitHub Pages production build reads `src/config.json` unless a build environment variable is provided.
 
-1. Create a new Supabase project named AutoWhatsApp in the owner’s existing Supabase account. Do not link this checkout to BottleTrack’s project or reuse its database, storage, API keys or auth users. Review and apply `supabase/migrations/20261114115631_autowhatsapp_initial.sql` using its SQL Editor, or link this checkout with the Supabase CLI and run `supabase db push`. This adds tables and policies; it does not edit BottleTrack's inventory. Verify the policies in staging before production.
-2. Enable Supabase email OTP/magic-link authentication. Set the Auth Site URL and redirect allowlist to the final frontend URL (and localhost for development). Users sign in to this new project independently; BottleTrack itself has no users to migrate. Public signups should be disabled if only existing invited users should access the app. A private Sites audience is an additional outer access gate.
-The checked-in src/config.json contains only this app’s public URL and publishable key, so CI builds work without secrets. Environment variables override these public defaults.
+`manual-reminders.sql` is the migration already applied to the existing project (20261120081002). Do not reapply it. Earlier migrations/source remain in the archive branch; a brand-new Supabase instance needs the original private storage bucket and authentication configuration before this incremental migration. Existing legacy records are retained; they are not silently imported as Calendar reminders.
 
-3. Create a separate `autowhatsapp` repository under the owner’s existing GitHub account and push only this workspace. Set Pages to deploy through GitHub Actions. Build with `VITE_SUPABASE_URL` and `VITE_SUPABASE_PUBLISHABLE_KEY`. Deploy `dist/` through GitHub Pages (workflow included) or Sites. GitHub Pages cannot run the queue; the Supabase functions below must be deployed independently.
-4. Deploy `dispatch` and `webhook` with `supabase functions deploy dispatch` and `supabase functions deploy webhook`. The checked-in config disables Supabase JWT verification for these two routes because dispatch verifies its own cron bearer secret and webhook verifies Meta HMAC. Keep the platform-provided service-role key server-only.
-5. Set Edge Function secrets in the Supabase dashboard: `AW_CRON_SECRET` (high-entropy random value), `META_ACCESS_TOKEN` (business system-user token with required messaging permissions), `META_PHONE_NUMBER_ID`, `META_API_VERSION` (a currently supported Graph version from the Meta dashboard), `META_APP_SECRET`, `META_VERIFY_TOKEN` (random webhook verification string), and `ENABLE_LIVE_SEND=false`. Supabase supplies `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` to functions. Never commit these values.
-6. Configure Meta's webhook callback as `https://<project-ref>.supabase.co/functions/v1/webhook`, its verify token, and the messages subscription. Only events for `META_PHONE_NUMBER_ID` are accepted. Signature verification uses the Meta app secret. Inbound messages establish the recipient's 24-hour reply window; delivery webhooks update history.
-7. Enable Supabase Cron (`pg_cron`), `pg_net` and Vault. Save secrets named `aw_dispatch_url` (full dispatch function URL) and `aw_cron_secret` in Vault through the dashboard. Run the following once. Inspect `cron.job` before running it again to avoid duplicate schedules:
+Supabase auth Site URL and allowed redirect must include the deployed app URL. Storage bucket `autowhatsapp` is private, restricted to the current user's folder. `aw_reminders` uses authenticated owner RLS. Google access tokens are memory-only and expire; reconnecting can be necessary. No token is placed in a Calendar description, URL, database, or browser persistent storage.
 
-```sql
-select cron.schedule('autowhatsapp-dispatch', '* * * * *', $cron$
- select net.http_post(
-  url := (select decrypted_secret from vault.decrypted_secrets where name='aw_dispatch_url'),
-  headers := jsonb_build_object('Content-Type','application/json','Authorization','Bearer ' ||
-    (select decrypted_secret from vault.decrypted_secrets where name='aw_cron_secret')),
-  body := '{}'::jsonb,
-  timeout_milliseconds := 120000
- );
-$cron$);
-```
+## Reliability and limits
 
-8. While live sending remains disabled, verify the endpoint returns `{"disabled":true}` through authenticated server-side tooling; verify another user's schedules and attachments are inaccessible. Sign in, upload a file and save/read back a schedule across two devices. These integration checks require your actual Supabase project and have not been run here.
-9. **Do not enable live sending until the owner explicitly approves a test recipient and message.** Then use Meta's test number and allowed test recipient, verify acceptance and signed delivery status, and only afterwards consider enabling production. Production uses `ENABLE_LIVE_SEND=true` and a valid Meta business number/payment setup. This implementation has sent no real messages.
+Calendar event IDs derive from reminder UUIDs. A retry after an ambiguous network response looks up that ID and verifies app ownership before updating, preventing duplicate events. Deleting an already deleted event is safe. The Calendar API and Supabase are separate systems: failed sync is clearly shown and must be retried. If an event was accepted but its metadata could not be saved, retry recovers its deterministic ID. Cancel also attempts cleanup for that error state. There is no background Calendar synchronization: changes made directly in Calendar are not automatically reflected in the app.
 
-## Scheduling and delivery semantics
+Google owns recurrence and notification timing after event creation. IANA timezones preserve wall-clock times through daylight savings; nonexistent local times are rejected. Missed reminders remain available; the app never sends catch-up messages. Device notification settings, internet availability, and Google Calendar determine notification delivery. A calendar shared by its owner can reveal event title/recipient name; message body and attachment links are not added to events.
 
-- The persistent Postgres queue uses `(schedule_id, scheduled_at)` uniqueness and atomic `FOR UPDATE SKIP LOCKED` claims, ten jobs per invocation. Increase throughput only after validating runtime/provider limits. Monitor cron responses and Edge Function logs; failures must not be silently ignored.
-- The cron polls every minute: this is minute-level scheduling, not an exact-to-the-second guarantee.
-- Recurrences use an IANA timezone. Daily, weekly and selected-day schedules preserve local wall-clock time across DST; intervals use elapsed minutes. Nonexistent initial local times are rejected. A recurrence landing in a spring-forward gap uses the timezone library's forward normalization, then returns to the configured clock the next day. Fall-back overlaps use the earlier instant. End dates are inclusive in the schedule timezone.
-- Missed one-time jobs send when the server recovers. An overdue recurring schedule sends the oldest pending occurrence **once**, then advances past missed times to its next future occurrence. A failed occurrence blocks that schedule until corrected/retried, or cancelled and duplicated.
-- Each message part is recorded independently; text plus a file is two WhatsApp sends. Accepted parts are skipped on retry. Only explicit rate-limit rejections auto-retry (exponential delay, five attempts). Definite rejections are manually retryable while active. Network timeouts, 5xx responses and stale in-flight jobs are held as **uncertain**. Check WhatsApp before creating a replacement; exactly-once external delivery cannot be guaranteed by the provider API.
-- A worker interrupted after recording provider acceptance can be held conservatively for manual review even if the provider accepted everything. `sent` means provider-accepted, not device-delivered; individual parts show delivery/read/failed webhooks.
-- Pausing/cancelling stops unclaimed work. A send already handed to WhatsApp cannot be recalled. Editing an attempted occurrence's content is blocked; cancel and duplicate instead. Editing/resuming an overdue paused schedule uses the missed-time rule.
-- Only signed inbound webhooks open reply windows. User-entered consent does not open one. Consent is an explicit recipient permission attestation per schedule. Honor opt-out requests by cancelling that recipient's active schedules; this version does not automatically interpret conversational opt-outs.
-- One attachment per schedule is supported: JPEG/PNG (max 5 MB), PDF, MP4, MP3 (max 16 MB). Uploads remain in a private bucket. Multiple-file batches, arbitrary file formats and template button parameters are not supported. Body variables and a matching media header are supported for approved templates. Failed/orphan uploads are not automatically deleted; define a retention policy and remove old files through Storage administration.
+The app stores contacts as recipient details on each reminder; it does not upload your address book. Supabase free-tier storage/auth quotas and inactivity rules still apply; free services are not a contractual uptime guarantee. No paid service has been created for this update. There are no WhatsApp API message charges because sending is manual.
 
-## WhatsApp requirements and costs (checked November 14, 2026)
+## Validation
 
-WhatsApp Business Platform is a business messaging service; it is not an unrestricted personal-account automation API. Recipient opt-in is required. Business-initiated messages outside a 24-hour inbound-message window require approved templates. Template approval, language, variable count and media header must match Meta's definition. Provider rejections are surfaced in history.
+`npm test`: ten tests covering one-time/weekly/weekday events, Jerusalem daylight savings, invalid dates, Hebrew encoding, popup-only reminders, retry duplicate prevention, cancellation, recurrence removal, and authorization/transient failures.
 
-An existing **WhatsApp Business app** number may be eligible for official coexistence onboarding. Eligibility and onboarding must be verified in Meta's flow. A regular personal WhatsApp number cannot simply be used by supplying its number to this app. No browser-session scraping or WhatsApp Web automation is used.
+`npm run build`: production bundle. Database isolation is checked in a rolled-back transaction with synthetic users. No real recipients, messages, or Calendar events are used.
 
-Meta charges delivered template messages according to destination market/category and volume; service messages are free under current pricing. Rates vary, so consult the current rate card rather than assuming a fixed monthly amount. Supabase functions, database, Storage, egress and email may incur plan/usage costs. GitHub Pages and Sites hosting depend on account limits. A BSP, if chosen instead of direct Cloud API, can add fees.
+## References
 
-Sources:
-- https://whatsappbusiness.com/policy/
-- https://whatsappbusiness.com/products/platform-pricing/
-- https://developers.facebook.com/documentation/business-messaging/whatsapp/overview
-
-## Validation and remaining checks
-
-`npm test` exercises actual recurrence logic and the dispatch core with a mocked database/provider: one-time scheduling, weekly DST, weekdays/end dates, invalid zones, gaps, custom intervals, cancellation, the disabled switch, provider acceptance, accepted-part deduplication, rate-limit retry, rejection and uncertain transport failure. `npm run build` builds the production frontend.
-
-Database migrations, real RLS enforcement, concurrent SQL claims, Supabase Auth/email, Storage, cron execution, Meta onboarding and signed production webhooks need staging verification after credentials are supplied. Unit mocks do not prove those services are configured. There is no live sending or working cloud persistence until these deployment steps are completed.
-
-## Free PC connection
-
-Use [FREE-PC.md](FREE-PC.md) and double-click Start-Free.cmd. No paid hosting is needed; your PC must remain awake and online for sending. The cloud site remains accessible from iPhone and PC.
+- [Google Identity Services setup](https://developers.google.com/identity/oauth2/web/guides/get-google-api-clientid)
+- [Google token model](https://developers.google.com/identity/oauth2/web/guides/use-token-model)
+- [Calendar events insert](https://developers.google.com/workspace/calendar/api/v3/reference/events/insert)
+- [WhatsApp click to chat](https://faq.whatsapp.com/5913398998672934)
+- [Web Share support and requirements](https://developer.mozilla.org/en-US/docs/Web/API/Navigator/share)

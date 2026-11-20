@@ -1,291 +1,62 @@
-import React, { useEffect, useState } from 'react';
-import { createRoot } from 'react-dom/client';
-import { Send, Plus, CalendarDays, Users, Clock, Check, Pause, Play, Copy, X, Paperclip, Search, ArrowUpRight, MessageCircle, Settings, LogOut } from 'lucide-react';
-import { DateTime } from 'luxon';
-import { db, configured } from './client';
-import { validate } from './schedule';
+import React,{useEffect,useState} from 'react';
+import {createRoot} from 'react-dom/client';
+import {DateTime} from 'luxon';
+import {MessageCircle,CalendarDays,Plus,ArrowUpRight,Paperclip,Check,Clock,X,Settings,Search,LogOut} from 'lucide-react';
+import {db} from './client';
+import {authorize,calendarReady,clientId,syncReminder,cancelCalendar,forgetCalendar} from './calendar';
+import {validate,whatsappUrl,nextOccurrence} from './model';
 import './styles.css';
-import { useLanguage } from './i18n';
-import { ConnectionPanel } from './connection';
-const initial = () => ({
-  phone: '',
-  contact_name: '',
-  consent: false,
-  body: '',
-  mode: 'text',
-  transport: 'web',
-  template_name: '',
-  language: 'en_US',
-  parameters: [],
-  local_time: DateTime.now().setZone('Asia/Jerusalem').plus({
-    days: 1
-  }).set({
-    hour: 9,
-    minute: 0
-  }).toFormat("yyyy-MM-dd'T'HH:mm"),
-  timezone: 'Asia/Jerusalem',
-  repeat: 'once',
-  weekdays: [1],
-  interval_minutes: 60,
-  end_date: '',
-  attachment_path: null
-});
-const fmt = (v, z) => DateTime.fromISO(v).setZone(z || 'Asia/Jerusalem').setLocale(document.documentElement.lang || 'en').toFormat('ccc, dd LLL · HH:mm');
-function App() {
-  const {
-    language,
-    setLanguage,
-    t
-  } = useLanguage();
-  const [session, setSession] = useState(null),
-    [ready, setReady] = useState(!configured),
-    [tab, setTab] = useState('Overview'),
-    [schedules, setSchedules] = useState([]),
-    [jobs, setJobs] = useState([]),
-    [contacts, setContacts] = useState([]),
-    [modal, setModal] = useState(false),
-    [form, setForm] = useState(initial),
-    [review, setReview] = useState(false),
-    [file, setFile] = useState(null),
-    [search, setSearch] = useState(''),
-    [filter, setFilter] = useState('all'),
-    [error, setError] = useState(''),
-    [busy, setBusy] = useState(false),
-    [email, setEmail] = useState(''),
-    [notice, setNotice] = useState(''),
-    [contact, setContact] = useState({
-      name: '',
-      phone: '',
-      consent: false
-    });
-  const change = (key, value) => setForm(f => ({
-    ...f,
-    [key]: value
-  }));
-  const run = async fn => {
-    setError('');
-    setBusy(true);
-    try {
-      await fn();
-    } catch (e) {
-      setError(e.message);
-    } finally {
-      setBusy(false);
-    }
-  };
-  async function load() {
-    if (!db || !session) return;
-    const r = await Promise.all([db.from('aw_schedules').select('*').order('next_at'), db.from('aw_jobs').select('*,aw_parts(*)').order('created_at', {
-      ascending: false
-    }).limit(200), db.from('aw_contacts').select('*').order('name')]);
-    for (const x of r) if (x.error) throw x.error;
-    setSchedules(r[0].data);
-    setJobs(r[1].data);
-    setContacts(r[2].data);
-  }
-  useEffect(() => {
-    if (!db) return;
-    db.auth.getSession().then(({
-      data
-    }) => {
-      setSession(data.session);
-      setReady(true);
-    });
-    const {
-      data
-    } = db.auth.onAuthStateChange((_, s) => setSession(s));
-    return () => data.subscription.unsubscribe();
-  }, []);
-  useEffect(() => {
-    if (!session) return;
-    run(load);
-    const id = setInterval(() => load().catch(e => setError(e.message)), 15000);
-    return () => clearInterval(id);
-  }, [session]);
-  const requireAccount = () => {
-    if (!session) throw Error(configured ? 'Sign in to save schedules.' : 'Connect Supabase to save schedules. See Setup for instructions.');
-  };
-  async function save() {
-    requireAccount();
-    const row = {
-      ...form
-    };
-    delete row.id;
-    delete row.created_at;
-    delete row.owner_id;
-    if (file) {
-      const path = `${session.user.id}/${crypto.randomUUID()}/${file.name.replace(/[^a-zA-Z0-9._-]/g, '_')}`;
-      const r = await db.storage.from('autowhatsapp').upload(path, file);
-      if (r.error) throw r.error;
-      row.attachment_path = path;
-      row.attachment_name = file.name;
-      row.attachment_type = file.type;
-    }
-    row.next_at = validate(row);
-    row.end_date = row.end_date || null;
-    row.state = 'active';
-    const r = form.id ? await db.from('aw_schedules').update(row).eq('id', form.id) : await db.from('aw_schedules').insert(row);
-    if (r.error) throw r.error;
-    setModal(false);
-    setNotice('Schedule saved. Sending requires the configured background worker and WhatsApp account.');
-    await load();
-  }
-  async function action(s, state) {
-    requireAccount();
-    const r = await db.from('aw_schedules').update({
-      state
-    }).eq('id', s.id);
-    if (r.error) throw r.error;
-    await load();
-  }
-  function compose(s) {
-    setForm(s ? {
-      ...s,
-      id: undefined,
-      local_time: initial().local_time,
-      state: 'active'
-    } : initial());
-    setReview(false);
-    setFile(null);
-    setModal(true);
-  }
-  const active = schedules.filter(s => s.state === 'active');
-  const shown = schedules.filter(s => (filter === 'all' || s.state === filter) && `${s.contact_name} ${s.phone} ${s.body}`.toLowerCase().includes(search.toLowerCase()));
-  return <div className="shell"><aside><a className="brand" href="#"><span className="brandmark"><MessageCircle size={23} /></span>AutoWhatsApp<span className="brand-dot">•</span></a><div className="workspace">{t("YOUR WORKSPACE ")}<span>{t("PERSONAL")}</span></div><nav>{[['Overview', CalendarDays], ['Messages', MessageCircle], ['Contacts', Users], ['Setup', Settings]].map(([name, Icon]) => <button className={tab === name ? 'selected' : ''} key={t(name)} onClick={() => setTab(name)}><Icon size={19} />{t(name)}{name === 'Messages' && <small>{active.length}</small>}</button>)}</nav><div className="sidebar-note"><Clock size={22} /><strong>{t("A little ahead.")}<br />{t("A lot less to remember.")}</strong><p>{t("Make time for what matters. Let your messages take care of themselves.")}</p></div><div className="account"><div className="avatar">{session ? t("ME") : t("A")}</div><div><b>{session?.user?.email || t("Your personal workspace")}</b><span>{session ? t("Supabase account") : t("Setup pending")}</span></div>{session && <button aria-label={t("Sign out")} onClick={() => db.auth.signOut()}><LogOut size={15} /></button>}</div></aside>
- <main><header><span>{t("Workspace ")}<span className="slash">/</span> {t(tab)}</span><div className="header-tools"><select aria-label={t("Interface language")} value={language} onChange={e => setLanguage(e.target.value)}><option value="en">{t("English")}</option><option value="he">עברית</option></select><span className="timezone"><Clock size={14} />{t(" Asia/Jerusalem")}</span></div></header>
- <div className="content">{error && <div className="alert" role="alert">{t(error)}<button onClick={() => setError('')}>{t("Dismiss")}</button></div>}{notice && <div className="notice" role="status">{t(notice)}<button onClick={() => setNotice('')}>×</button></div>}
- {(!configured || !session) && <div className="connection"><span className="connection-dot" /><span>{!configured ? t("Preview workspace · Connect Supabase and WhatsApp to enable scheduling.") : t("Sign in to access your private messages.")}</span><button onClick={() => setTab('Setup')}>{t("Set up account ")}<ArrowUpRight size={15} /></button></div>}
- <div className="page-title"><div><div className="eyebrow">{t("A LITTLE PLANNING GOES A LONG WAY")}</div><h1>{tab === 'Overview' ? t("Goodbye, “I forgot.”") : tab === 'Messages' ? t("Your messages, on time.") : tab === 'Contacts' ? t("People you keep close.") : t("Let’s get connected.")}</h1><p>{tab === 'Overview' ? t("The right message. The right moment. Already taken care of.") : tab === 'Contacts' ? t("Keep your recipients and their permission in one place.") : tab === 'Setup' ? t("One secure account. Messages that run while you’re away.") : t("Plan once, and leave the remembering to us.")}</p></div>{tab !== 'Setup' && <button className="primary" onClick={() => compose()}><Plus size={18} />{t(" Schedule a message")}</button>}</div>
- {(tab === 'Overview' || tab === 'Messages') && <><div className="stats">{[[CalendarDays, 'Upcoming messages', active.length, 'Ready when the moment comes'], [Clock, 'Recurring schedules', active.filter(s => s.repeat !== 'once').length, 'One less thing on your list'], [Check, 'Sent messages', jobs.filter(j => j.status === 'sent').length, 'Thoughtfully delivered']].map(([Icon, label, n, sub]) => <div className="stat" key={t(label)}><div><span>{t(label)}</span><Icon size={19} /></div><b>{n.toString().padStart(2, '0')}</b><p>{t(sub)}</p></div>)}</div>
- {tab === 'Overview' && <section className="hero"><div className="hero-copy"><span className="pill"><span />{t(" PLANNED WITH CARE")}</span><h2>{t("Stay in touch.")}<br />{t("Even when life gets busy.")}</h2><p>{t("A weekly check-in. Tomorrow’s reminder.")}<br />{t("A message that arrives just when it should.")}</p><button onClick={() => compose()}>{t("Plan your next message ")}<ArrowUpRight size={17} /></button></div><div className="illustration" aria-hidden="true"><div className="orbit o1" /><div className="orbit o2" /><div className="floating-clock"><Clock size={36} /></div><div className="message-card"><span className="mini-label"><span className="mini-icon"><MessageCircle size={17} /></span>{t(" A THOUGHT, SCHEDULED ")}<Check size={16} /></span><p>{t("Hey! Just a little reminder")}<br />{t("for tomorrow ☀")}</p><div><CalendarDays size={14} />{t(" Tomorrow, 9:00 AM ")}<span>✓✓</span></div></div><span className="spark s1">✦</span><span className="spark s2">✧</span></div></section>}
- <section className="list-section"><div className="section-heading"><div><h2>{tab === 'Overview' ? t("On the horizon") : t("Scheduled messages")}</h2><p>{t("Your plans, all in one place.")}</p></div><div className="tools"><label className="search"><Search size={16} /><input aria-label={t("Search messages")} placeholder={t("Search messages…")} value={search} onChange={e => setSearch(e.target.value)} /></label><select aria-label={t("Filter messages")} value={filter} onChange={e => setFilter(e.target.value)}><option value="all">{t("All schedules")}</option>{['active', 'paused', 'cancelled', 'completed'].map(x => <option key={x} value={x}>{t(x)}</option>)}</select></div></div>
- <div className="table-wrap"><table><thead><tr><th>{t("RECIPIENT / MESSAGE")}</th><th>{t("NEXT SEND")}</th><th>{t("REPEAT")}</th><th>{t("STATUS")}</th><th>{t("ACTIONS")}</th></tr></thead><tbody>{shown.map(s => <tr key={s.id}><td><b>{s.contact_name || s.phone}</b><span>{s.body || s.template_name || s.attachment_name}</span></td><td>{fmt(s.next_at, s.timezone)}<span>{s.timezone}</span></td><td>{s.repeat === 'interval' ? `${t("Every")} ${s.interval_minutes} ${t("minutes")}` : t(s.repeat)}</td><td><span className={'status ' + s.state}>{t(s.state)}</span></td><td><div className="actions"><button title={t("Edit")} onClick={() => {
-                          setForm(s);
-                          setReview(false);
-                          setFile(null);
-                          setModal(true);
-                        }}>{t("Edit")}</button><button title={t("Duplicate")} onClick={() => compose(s)}><Copy size={15} /></button>{['active', 'paused'].includes(s.state) && <><button title={s.state === 'active' ? t("Pause") : t("Resume")} onClick={() => run(() => action(s, s.state === 'active' ? 'paused' : 'active'))}>{s.state === 'active' ? <Pause size={15} /> : <Play size={15} />}</button><button title={t("Cancel schedule")} onClick={() => run(() => action(s, 'cancelled'))}><X size={15} /></button></>}</div></td></tr>)}</tbody></table>{!shown.length && <div className="empty"><div><Send size={25} /></div><h3>{t("A clear calendar, for now.")}</h3><p>{t("Give your next message a time and place.")}<br />{t("We’ll keep it here, ready for its moment.")}</p><button onClick={() => compose()}><Plus size={15} />{t(" Create your first schedule")}</button></div>}</div></section>
- <section className="history"><h2>{t("Sending activity")}</h2>{!jobs.length ? <p>{t("Delivery updates will appear here after your first scheduled send.")}</p> : jobs.map(j => <article key={j.id}><div><b>{j.payload.contact_name || j.payload.phone}</b><span>{fmt(j.scheduled_at)} · {t(j.status)}</span><p>{j.error}</p>{j.aw_parts.map(p => <small key={p.id}>{t(p.delivery || p.status)}{p.error ? ` · ${p.error}` : ''} </small>)}</div>{j.status === 'failed' && <button onClick={() => run(async () => {
-                const r = await db.rpc('aw_retry', {
-                  jid: j.id
-                });
-                if (r.error) throw r.error;
-                await load();
-              })}>{t("Retry failed parts")}</button>}{j.status === 'uncertain' && <span>{t("Check WhatsApp before creating a replacement.")}</span>}</article>)}</section></>}
- {tab === 'Contacts' && <section className="panel"><h2>{t("Add a contact")}</h2><form className="contact-form" onSubmit={e => {
-            e.preventDefault();
-            run(async () => {
-              requireAccount();
-              const r = await db.from('aw_contacts').upsert(contact, {
-                onConflict: 'owner_id,phone'
-              });
-              if (r.error) throw r.error;
-              setContact({
-                name: '',
-                phone: '',
-                consent: false
-              });
-              await load();
-            });
-          }}><label>{t("Name")}<input required value={contact.name} onChange={e => setContact({
-                ...contact,
-                name: e.target.value
-              })} /></label><label>{t("WhatsApp number")}<input dir="ltr" required placeholder="+972501234567" pattern="\+[1-9][0-9]{7,14}" value={contact.phone} onChange={e => setContact({
-                ...contact,
-                phone: e.target.value
-              })} /></label><label className="check"><input type="checkbox" required checked={contact.consent} onChange={e => setContact({
-                ...contact,
-                consent: e.target.checked
-              })} />{t("I have permission to message this person.")}</label><button className="primary" disabled={busy}>{t("Save contact")}</button></form><div className="contact-grid">{contacts.map(c => <article key={c.id}><div className="avatar">{c.name.slice(0, 1)}</div><div><b>{c.name}</b><p>{c.phone}</p></div><button onClick={() => {
-                compose();
-                setForm({
-                  ...initial(),
-                  phone: c.phone,
-                  contact_name: c.name,
-                  consent: c.consent
-                });
-              }}>{t("Message")}</button><button aria-label={t("Delete contact")} onClick={() => run(async () => {
-                const r = await db.from('aw_contacts').delete().eq('id', c.id);
-                if (r.error) throw r.error;
-                await load();
-              })}><X size={16} /></button></article>)}</div></section>}
- {tab === 'Setup' && <><ConnectionPanel session={session} t={t} /><div className="setup-grid"><section className="panel"><span className="step">{t("01 / YOUR ACCOUNT")}</span><h2>{session ? t("You’re signed in") : t("Private by default")}</h2><p>{t("Use your independent AutoWhatsApp account. Its Supabase project and data are separate from BottleTrack.")}</p>{configured ? session ? <p>{session.user.email}</p> : <form onSubmit={e => {
-                e.preventDefault();
-                run(async () => {
-                  const {
-                    error
-                  } = await db.auth.signInWithOtp({
-                    email,
-                    options: {
-                      emailRedirectTo: location.origin + location.pathname
-                    }
-                  });
-                  if (error) throw error;
-                  setNotice('Check your email for a secure sign-in link.');
-                });
-              }}><label>{t("Email address")}<input dir="ltr" type="email" required value={email} onChange={e => setEmail(e.target.value)} /></label><button className="primary" disabled={busy || !ready}>{t("Email me a sign-in link")}</button></form> : <p className="setup-required">{t("Set VITE_SUPABASE_URL and VITE_SUPABASE_PUBLISHABLE_KEY, then rebuild. See the project README.")}</p>}</section><section className="panel"><span className="step">{t("02 / CONNECT WHATSAPP")}</span><h2>{t("Official. Reliable. Yours.")}</h2><p>{t("Configure a Meta business phone number, access token, signed webhook, and server cron in Supabase. Live sending is disabled by default.")}</p><p>{t("Messages outside a recipient’s 24-hour reply window require an approved template. Recurring schedules are usually best sent as templates.")}</p><a href="https://developers.facebook.com/documentation/business-messaging/whatsapp/overview" target="_blank" rel="noreferrer">{t("WhatsApp platform guide ↗")}</a></section><section className="panel"><span className="step">{t("03 / ALWAYS ON")}</span><h2>{t("No open tabs required.")}</h2><p>{t("A database-backed queue is checked every minute by the server. Restarted sends with an unknown outcome are held for review to prevent accidental duplicates.")}</p><p>{t("Overdue recurring messages send once, then skip past missed occurrences. Read the deployment guide before enabling the worker.")}</p></section></div></>}
- <footer><span><MessageCircle size={14} />{t(" A little ahead. Always thoughtful.")}</span><span>{t("Built for peace of mind.")}</span></footer></div></main>
- {modal && <div className="overlay"><section className="modal" role="dialog" aria-modal="true" aria-labelledby="compose-title"><div className="modal-head"><div><div className="eyebrow">{t("MAKE ROOM FOR LATER")}</div><h2 id="compose-title">{review ? t("A final look.") : form.id ? t("Edit your message") : t("Schedule a little thought.")}</h2></div><button aria-label={t("Close")} onClick={() => setModal(false)}><X /></button></div>{error && <div className="alert" role="alert">{t(error)}</div>}
- {review ? <div className="review"><label>{t("TO")}</label><h3>{form.contact_name || form.phone}</h3><p>{form.phone}</p><blockquote>{form.body || form.template_name || t("Attachment message")}</blockquote>{(file || form.attachment_name) && <p><Paperclip size={16} /> {file?.name || form.attachment_name}</p>}<p>{fmt(DateTime.fromISO(form.local_time, {
-              zone: form.timezone
-            }).toUTC().toISO(), form.timezone)} · {form.timezone}</p><p>{t("Repeats: ")}{t(form.repeat)}{form.end_date ? ` · ${t("Until")} ${form.end_date}` : ''}</p><p className="muted">{form.transport === 'web' ? t("Your WhatsApp bridge must be connected and live sending enabled at the scheduled time.") : t("Free-form messages are checked against the recipient’s reply window at sending time. Scheduling does not guarantee WhatsApp acceptance.")}</p><div className="modal-foot"><button onClick={() => setReview(false)}>{t("Back to editing")}</button><button className="primary" disabled={busy} onClick={() => run(save)}>{busy ? t("Saving…") : t("Confirm schedule")}<Check size={16} /></button></div></div> : <form onSubmit={e => {
-          e.preventDefault();
-          run(async () => {
-            validate({
-              ...form,
-              attachment_path: file ? 'pending' : form.attachment_path
-            });
-            setReview(true);
-          });
-        }}>
- <div className="form-grid"><label>{t("Contact")}<select value="" onChange={e => {
-                const c = contacts.find(c => c.id === e.target.value);
-                if (c) setForm({
-                  ...form,
-                  phone: c.phone,
-                  contact_name: c.name,
-                  consent: c.consent
-                });
-              }}><option value="">{t("Choose a saved contact")}</option>{contacts.map(c => <option key={c.id} value={c.id}>{c.name} · {c.phone}</option>)}</select></label><label>{t("Or enter a number")}<input dir="ltr" required placeholder="+972501234567" value={form.phone} onChange={e => change('phone', e.target.value)} /></label></div>
- <label className="check"><input type="checkbox" checked={form.consent} onChange={e => change('consent', e.target.checked)} />{t("I have this recipient’s permission to send WhatsApp messages.")}</label><label>{t("Sending connection")}<select value={form.transport || 'cloud'} onChange={e => setForm({
-              ...form,
-              transport: e.target.value,
-              mode: 'text'
-            })}><option value="web">{t("Personal WhatsApp · QR connection")}</option><option value="cloud">{t("WhatsApp Business · Cloud API")}</option></select></label><label>{t("Message type")}<select value={form.mode} onChange={e => change('mode', e.target.value)}><option value="text">{form.transport === 'web' ? t("Text / files") : t("Text / files · requires a 24-hour reply window")}</option>{form.transport !== 'web' && <option value="template">{t("Approved WhatsApp template")}</option>}</select></label>
- {form.mode === 'template' ? <><div className="form-grid"><label>{t("Approved template name")}<input required value={form.template_name} onChange={e => change('template_name', e.target.value)} /></label><label>{t("Template language")}<input required value={form.language} onChange={e => change('language', e.target.value)} /></label></div><label>{t("Body variables (one per line, in order)")}<textarea dir="auto" value={form.parameters.join('\n')} onChange={e => change('parameters', e.target.value.split('\n'))} /></label><p className="hint">{t("An attached file becomes the template media header. It must match the approved template. Button variables are not supported.")}</p></> : <label>{t("Your message")}<textarea dir="auto" placeholder={t("What would you like to say?")} maxLength={4096} rows={4} value={form.body} onChange={e => change('body', e.target.value)} /></label>}
- <label className="upload"><Paperclip size={18} /><span>{file?.name || form.attachment_name || t("Add a file (optional)")}<small>{t("JPG, PNG, PDF, MP4, MP3 · up to 16 MB")}</small></span><input type="file" accept="image/jpeg,image/png,application/pdf,video/mp4,audio/mpeg" onChange={e => {
-              const f = e.target.files[0];
-              if (f && f.size > 16 * 1024 * 1024) {
-                setError('Choose a file smaller than 16 MB.');
-                return;
-              }
-              if (f && f.type.startsWith('image/') && f.size > 5 * 1024 * 1024) {
-                setError('Images must be smaller than 5 MB.');
-                return;
-              }
-              setFile(f);
-              setError('');
-            }} /></label>{(file || form.attachment_path) && <div className="file-preview">{file?.type.startsWith('image/') && <Preview file={file} t={t} />}<button type="button" onClick={() => {
-              setFile(null);
-              change('attachment_path', null);
-              change('attachment_name', null);
-            }}>{t("Remove attachment")}</button>{form.attachment_path && <button type="button" onClick={() => run(async () => {
-              const r = await db.storage.from('autowhatsapp').createSignedUrl(form.attachment_path, 60);
-              if (r.error) throw r.error;
-              window.open(r.data.signedUrl, '_blank', 'noopener');
-            })}>{t("Preview saved file")}</button>}</div>}
- <div className="form-grid"><label>{t("Date & time")}<input required type="datetime-local" value={form.local_time} onChange={e => change('local_time', e.target.value)} /></label><label>{t("Timezone")}<select value={form.timezone} onChange={e => change('timezone', e.target.value)}>{[...new Set(['Asia/Jerusalem', Intl.DateTimeFormat().resolvedOptions().timeZone, ...Intl.supportedValuesOf('timeZone')])].map(z => <option key={z}>{z}</option>)}</select></label><label>{t("Repeat")}<select value={form.repeat} onChange={e => change('repeat', e.target.value)}><option value="once">{t("One time")}</option><option value="daily">{t("Every day")}</option><option value="weekly">{t("Every week")}</option><option value="weekdays">{t("Selected weekdays")}</option><option value="interval">{t("Custom interval")}</option></select></label>{form.repeat === 'interval' ? <label>{t("Every (minutes)")}<input type="number" min="15" required value={form.interval_minutes} onChange={e => change('interval_minutes', Number(e.target.value))} /></label> : <label>{t("End date (optional)")}<input type="date" value={form.end_date || ''} onChange={e => change('end_date', e.target.value)} /></label>}</div>
- {form.repeat === 'interval' && <label>{t("End date (optional)")}<input type="date" value={form.end_date || ''} onChange={e => change('end_date', e.target.value)} /></label>}
- {form.repeat === 'weekdays' && <div className="weekdays">{['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map((d, i) => <label key={d}><input type="checkbox" checked={form.weekdays.includes(i + 1)} onChange={e => change('weekdays', e.target.checked ? [...form.weekdays, i + 1] : form.weekdays.filter(n => n !== i + 1))} />{t(d)}</label>)}</div>}<div className="modal-foot"><span><Clock size={14} />{t(" Sent by the server, even when you’re away.")}</span><button className="primary" disabled={busy}>{t("Review schedule ")}<ArrowUpRight size={16} /></button></div></form>}</section></div>}
- </div>;
+const fresh=()=>({id:crypto.randomUUID(),contact_name:'',phone:'',body:'',attachments:[],local_time:DateTime.now().setZone('Asia/Jerusalem').plus({days:1}).set({hour:9,minute:0}).toFormat("yyyy-MM-dd'T'HH:mm"),timezone:'Asia/Jerusalem',repeat:'once',weekdays:[1,2,3,4,5],end_date:'',reminder_minutes:0,state:'pending',calendar_status:'pending'});
+function FilePreview({file}){
+ const [url,setUrl]=useState('');
+ useEffect(()=>{const value=URL.createObjectURL(file);setUrl(value);return()=>URL.revokeObjectURL(value)},[file]);
+ return file.type.startsWith('image/')?<img className="file-preview" src={url} alt={file.name}/>:null;
 }
-function Preview({file,t}) {
-  const [url, setUrl] = useState('');
-  useEffect(() => {
-    const u = URL.createObjectURL(file);
-    setUrl(u);
-    return () => URL.revokeObjectURL(u);
-  }, [file]);
-  return <img src={url} alt={t("Attachment preview")} />;
+function App(){
+ const [lang,setLang]=useState(()=>localStorage.getItem('aw-language')||'en');const t=(en,he)=>lang==='he'?he:en;
+ const [session,setSession]=useState(null),[rows,setRows]=useState([]),[tab,setTab]=useState('upcoming'),[form,setForm]=useState(null),[files,setFiles]=useState([]),[review,setReview]=useState(false),[detail,setDetail]=useState(null),[prepared,setPrepared]=useState([]),[email,setEmail]=useState(''),[error,setError]=useState(''),[notice,setNotice]=useState(''),[busy,setBusy]=useState(false),[connected,setConnected]=useState(false),[query,setQuery]=useState('');
+ const run=async fn=>{setError('');setBusy(true);try{await fn()}catch(e){setError(e.message)}finally{setBusy(false)}};
+ const fmt=(date,zone)=>DateTime.fromISO(date,{zone:zone||'Asia/Jerusalem'}).setLocale(lang).toFormat('ccc, d LLL · HH:mm');
+ useEffect(()=>{document.documentElement.lang=lang;document.documentElement.dir=lang==='he'?'rtl':'ltr';localStorage.setItem('aw-language',lang)},[lang]);
+ async function load(){const {data,error}=await db.from('aw_reminders').select('*').order('local_time');if(error)throw error;setRows(data)}
+ useEffect(()=>{const id=new URLSearchParams(location.hash.slice(1)).get('reminder');if(id)sessionStorage.setItem('aw-open-reminder',id);db.auth.getSession().then(({data})=>setSession(data.session));const {data}=db.auth.onAuthStateChange((_,s)=>setSession(s));return()=>data.subscription.unsubscribe()},[]);
+ useEffect(()=>{setRows([]);setDetail(null);setPrepared([]);forgetCalendar();setConnected(false);if(session)load().catch(e=>setError(e.message))},[session?.user?.id]);
+ useEffect(()=>{if(!session||!rows.length)return;const id=new URLSearchParams(location.hash.slice(1)).get('reminder')||sessionStorage.getItem('aw-open-reminder');if(id){const row=rows.find(r=>r.id===id);if(row){setDetail(row);sessionStorage.removeItem('aw-open-reminder');history.replaceState(null,'',location.pathname)}}},[session,rows]);
+ useEffect(()=>{setPrepared([]);if(!detail||!session)return;let alive=true;Promise.all(detail.attachments.map(async a=>{const {data,error}=await db.storage.from('autowhatsapp').download(a.path);if(error)throw error;return new File([data],a.name,{type:a.type})})).then(f=>{if(alive)setPrepared(f)}).catch(e=>{if(alive)setError(e.message)});return()=>{alive=false}},[detail?.id]);
+ async function connect(){await authorize();setConnected(true);setNotice(t('Google Calendar connected for this session.','יומן Google מחובר להפעלה זו.'))}
+ async function patch(id,fields){const r=await db.from('aw_reminders').update(fields).eq('id',id);if(r.error)throw r.error;await load()}
+ async function calendar(row){const event=await syncReminder(row,location.origin+location.pathname);await patch(row.id,{calendar_event_id:event.id,calendar_url:event.htmlLink,calendar_status:'synced',calendar_error:null});return event}
+ async function save(withCalendar){
+ if(!session)throw Error(t('Sign in before saving.','יש להיכנס לפני השמירה.'));
+ if(withCalendar){await authorize();setConnected(true)}
+ const row={...form,attachments:[...form.attachments]};delete row.owner_id;delete row.created_at;validate({...row,attachments:[...row.attachments,...files]},form.calendar_event_id&&form.repeat!=='once'?0:Date.now());
+ for(const file of files){const path=session.user.id+'/'+crypto.randomUUID()+'/'+file.name.replace(/[^a-zA-Z0-9._-]/g,'_');const {error}=await db.storage.from('autowhatsapp').upload(path,file);if(error)throw error;row.attachments.push({path,name:file.name,type:file.type,size:file.size})}
+ row.end_date=row.end_date||null;row.calendar_status='pending';row.calendar_error=null;
+ const {error}=await db.from('aw_reminders').upsert(row);if(error)throw error;
+ if(withCalendar){try{await calendar(row);setNotice(t('Saved. Your reminder was added to Google Calendar.','נשמר. התזכורת נוספה ליומן Google.'))}catch(e){await patch(row.id,{calendar_status:'error',calendar_error:e.message});setForm(null);throw e}}
+ else setNotice(t('Draft saved. No Google Calendar reminder has been created yet.','הטיוטה נשמרה. עדיין לא נוצרה תזכורת ביומן Google.'));
+ setForm(null);await load();
+ }
+ async function retry(row){validate(row,row.repeat==='once'?Date.now():0);await authorize();setConnected(true);await calendar(row);setNotice(t('Google Calendar reminder synced.','התזכורת ביומן Google עודכנה.'))}
+ async function cancel(row){if(row.calendar_event_id||row.calendar_status==='error'){await authorize();await cancelCalendar(row)}await patch(row.id,{state:'cancelled',calendar_status:'cancelled'});setDetail(null)}
+ async function share(){if(!prepared.length)throw Error(t('The attachment is still loading. Try again.','הקובץ עדיין נטען. נסו שוב.'));if(!navigator.canShare?.({files:prepared})||!navigator.share)throw Error(t('File sharing is unavailable here. Download the file and attach it in WhatsApp.','שיתוף קבצים אינו זמין כאן. הורידו את הקובץ וצרפו אותו ב־WhatsApp.'));await navigator.share({files:prepared,text:detail.body||'',title:detail.contact_name||'WhatsApp'})}
+ function download(file){const url=URL.createObjectURL(file),a=document.createElement('a');a.href=url;a.download=file.name;a.click();setTimeout(()=>URL.revokeObjectURL(url),30000)}
+ const visible=rows.filter(r=>(tab==='history'?r.state!=='pending':r.state==='pending')&&(r.contact_name+' '+r.phone+' '+r.body).toLowerCase().includes(query.toLowerCase()));
+ return <div className="app"><aside><a className="brand" href="#"><span><MessageCircle/></span>AutoWhatsApp</a><div className="workspace">{t('YOUR PERSONAL WORKSPACE','סביבת העבודה האישית שלך')}</div><nav>{[['upcoming',t('Reminders','תזכורות'),CalendarDays],['history',t('Completed','היסטוריה'),Check],['settings',t('Connections','חיבורים'),Settings]].map(([key,label,Icon])=><button key={key} className={tab===key?'active':''} onClick={()=>setTab(key)}><Icon size={19}/>{label}</button>)}</nav><div className="aside-note"><Clock/><h3>{t('A little ahead.','צעד אחד קדימה.')}<br/>{t('Always in your hands.','תמיד בשליטה שלך.')}</h3><p>{t('Your calendar remembers. You add the personal touch.','היומן זוכר. אתם מוסיפים את המגע האישי.')}</p></div><div className="account"><b>{session?.user?.email||t('Sign in to sync your drafts','כניסה לסנכרון הטיוטות')}</b>{session&&<button aria-label={t('Sign out','יציאה')} onClick={()=>db.auth.signOut()}><LogOut size={16}/></button>}</div></aside>
+ <main><header><span>{t('Workspace / ','סביבת עבודה / ')}{tab==='settings'?t('Connections','חיבורים'):t('Message reminders','תזכורות להודעות')}</span><div className="header-tools"><select aria-label="Language" value={lang} onChange={e=>setLang(e.target.value)}><option value="en">English</option><option value="he">עברית</option></select><span><Clock size={14}/>Asia/Jerusalem</span></div></header><div className="content">
+ {error&&<div className="alert" role="alert">{error}<button onClick={()=>setError('')}><X size={16}/></button></div>}{notice&&<div className="notice" role="status">{notice}<button onClick={()=>setNotice('')}><X size={16}/></button></div>}
+ {!session&&<div className="banner">{t('Your drafts are private. Sign in to save and access them on any device.','הטיוטות שלך פרטיות. היכנסו כדי לשמור ולגשת אליהן מכל מכשיר.')}<button onClick={()=>setTab('settings')}>{t('Sign in','כניסה')}<ArrowUpRight size={15}/></button></div>}
+ <div className="heading"><div><div className="eyebrow">{t('REMEMBER. OPEN. SEND.','זוכרים. פותחים. שולחים.')}</div><h1>{tab==='settings'?t('Connect your calendar.','מחברים את היומן.'):t('Goodbye, “I forgot.”','נפרדים מ״שכחתי״.')}</h1><p>{t('A calendar nudge. A prepared message. Your final press of Send.','תזכורת ביומן. הודעה מוכנה. לחיצה שלכם על שליחה.')}</p></div><button className="primary" onClick={()=>{setForm(fresh());setFiles([]);setReview(false)}}><Plus size={18}/>{t('New message reminder','תזכורת חדשה להודעה')}</button></div>
+ {tab!=='settings'?<><div className="stats">{[[CalendarDays,t('Ready to remember','ממתינות לתזכורת'),rows.filter(r=>r.state==='pending').length],[Check,t('On Google Calendar','נוספו ליומן Google'),rows.filter(r=>r.calendar_status==='synced'&&r.state==='pending').length],[MessageCircle,t('Marked as sent by you','סומנו על ידך כנשלחו'),rows.filter(r=>r.last_done_at).length]].map(([Icon,label,n])=><div className="stat" key={label}><span>{label}<Icon size={19}/></span><b>{String(n).padStart(2,'0')}</b></div>)}</div>
+ <section className="hero"><div><span className="pill">{t('THOUGHTFULLY PLANNED · PERSONALLY SENT','מתוכנן בתשומת לב · נשלח באופן אישי')}</span><h2>{t('Stay in touch.','נשארים בקשר.')}<br/>{t('Keep the final say.','שומרים על המילה האחרונה.')}</h2><p>{t('Plan a message and a photo. Get a Google Calendar reminder.','מתכננים הודעה ותמונה. מקבלים תזכורת ביומן Google.')}<br/>{t('Open WhatsApp when you’re ready, and send it yourself.','פותחים WhatsApp כשמוכנים, ושולחים בעצמכם.')}</p><button onClick={()=>setTab('settings')}>{t('Connect Google Calendar','חיבור יומן Google')}<ArrowUpRight size={16}/></button></div><div className="hero-card"><CalendarDays/><small>{t('YOUR NEXT LITTLE THOUGHT','המחשבה הקטנה הבאה שלך')}</small><p>{t('Hey! A little reminder for tomorrow ☀','היי! תזכורת קטנה למחר ☀')}</p><div><Clock size={14}/>{t('Your calendar will remind you','היומן שלך יזכיר לך')}</div><span><MessageCircle size={15}/>{t('You press Send','אתם לוחצים על שליחה')}</span></div></section>
+ <section className="messages"><div className="section-heading"><div><h2>{tab==='history'?t('Your history','ההיסטוריה שלך'):t('On the horizon','בקרוב אצלך')}</h2><p>{t('Prepared messages, with you in control.','הודעות מוכנות, בשליטה שלך.')}</p></div><label className="search"><Search size={16}/><input aria-label={t('Search reminders','חיפוש תזכורות')} placeholder={t('Search messages…','חיפוש הודעות…')} value={query} onChange={e=>setQuery(e.target.value)}/></label></div>
+ <div className="message-list">{visible.map(r=><article key={r.id}><div className="recipient-icon"><MessageCircle size={20}/></div><div className="message-info"><b>{r.contact_name||r.phone}</b><p dir="auto">{r.body||t('Attachment message','הודעה עם קובץ')}</p><small>{nextOccurrence(r)?fmt(nextOccurrence(r),r.timezone):t('Recurrence ended','החזרתיות הסתיימה')} · {r.timezone} · {t(r.repeat,{once:'פעם אחת',daily:'יומי',weekly:'שבועי',weekdays:'ימים נבחרים'}[r.repeat])}{r.attachments.length>0&&<> · <Paperclip size={11}/> {r.attachments.length}</>}</small><span className={'status '+r.calendar_status}>{r.calendar_status==='synced'?t('Calendar reminder added','התזכורת נוספה ליומן'):r.calendar_status==='cancelled'?t('Cancelled','בוטל'):t('Not added to Calendar','לא נוסף ליומן')}</span></div><div className="row-actions"><button onClick={()=>setDetail(r)}>{t('Open message','פתיחת ההודעה')}<ArrowUpRight size={15}/></button>{r.calendar_status!=='synced'&&r.state==='pending'&&<button disabled={busy} onClick={()=>run(()=>retry(r))}><CalendarDays size={15}/>{t('Add to Calendar','הוספה ליומן')}</button>}</div></article>)}{!visible.length&&<div className="empty"><CalendarDays size={34}/><h3>{t('A clear calendar, for now.','בינתיים, היומן פנוי.')}</h3><p>{t('Prepare a message. Pick a moment. We’ll help you remember.','מכינים הודעה. בוחרים רגע. אנחנו נעזור לזכור.')}</p><button onClick={()=>{setForm(fresh());setFiles([]);setReview(false)}}><Plus size={16}/>{t('Create your first reminder','יצירת התזכורת הראשונה')}</button></div>}</div></section></>:<div className="settings-grid"><section className="panel"><div className="eyebrow">01 / {t('YOUR PRIVATE DRAFTS','הטיוטות הפרטיות שלך')}</div><h2>{session?t('You’re signed in','התחברת בהצלחה'):t('Sign in to AutoWhatsApp','כניסה ל־AutoWhatsApp')}</h2><p>{t('The same saved messages and files, on your iPhone and PC.','אותן הודעות וקבצים שמורים, באייפון ובמחשב.')}</p>{session?<b>{session.user.email}</b>:<form onSubmit={e=>{e.preventDefault();run(async()=>{const {error}=await db.auth.signInWithOtp({email,options:{emailRedirectTo:location.origin+location.pathname}});if(error)throw error;setNotice(t('Check your email for the secure sign-in link.','קישור כניסה מאובטח נשלח לדוא״ל שלך.'))})}}><label>{t('Email for sign-in only','דוא״ל לכניסה בלבד')}<input type="email" dir="ltr" value={email} onChange={e=>setEmail(e.target.value)} required/></label><button className="primary" disabled={busy}>{t('Email sign-in link','שליחת קישור כניסה')}</button><p className="hint">{t('Message reminders go to Google Calendar, not email.','תזכורות להודעות מגיעות ליומן Google, לא לדוא״ל.')}</p></form>}</section>
+ <section className="panel"><div className="eyebrow">02 / GOOGLE CALENDAR</div><h2>{t('Let your calendar remember.','נותנים ליומן לזכור.')}</h2><p>{t('When you save a reminder, the app creates an event in your primary Google Calendar with a notification and a link back to your message.','בשמירת תזכורת, האפליקציה יוצרת אירוע ביומן Google הראשי שלך עם התראה וקישור חזרה להודעה.')}</p><button className="primary" onClick={()=>run(connect)} disabled={busy}>{connected&&calendarReady()?t('Calendar connected','היומן מחובר'):t('Connect Google Calendar','חיבור יומן Google')}</button>{!clientId()&&<div className="setup-note">{t('Owner setup needed: this website does not have a Google OAuth client configured yet. Automatic Calendar creation is unavailable until that one-time setup is completed.','נדרשת הגדרת בעלים: טרם הוגדר לאתר חיבור OAuth של Google. יצירת אירועים אוטומטית תהיה זמינה לאחר ההגדרה החד־פעמית.')}</div>}<p className="hint">{t('Google may ask you to reconnect after the authorization expires. Enable Calendar notifications on your phone.','Google עשויה לבקש התחברות חוזרת אחרי תפוגת האישור. יש להפעיל התראות יומן בטלפון.')}</p></section>
+ <section className="panel wide"><div className="eyebrow">03 / {t('NO ALWAYS-ON COMPUTER','אין צורך במחשב שפועל תמיד')}</div><h2>{t('Your reminder runs in Google Calendar.','התזכורת שלך פועלת ביומן Google.')}</h2><p>{t('Once the event is confirmed in Calendar, your PC and this site can be closed. Open the reminder link on your iPhone or PC, then open WhatsApp. You choose the recipient for shared photos and press Send yourself.','לאחר שהאירוע אושר ביומן, אפשר לסגור את האתר ואת המחשב. פותחים את קישור התזכורת באייפון או במחשב ואז פותחים WhatsApp. בשיתוף תמונות בוחרים את הנמען ולוחצים בעצמכם על שליחה.')}</p></section></div>}
+ <footer><span>{t('A little ahead. Always thoughtful.','צעד קדימה. תמיד בתשומת לב.')}</span><span>{t('No bots. Your final Send.','בלי בוטים. השליחה בידיים שלך.')}</span></footer></div></main>
+ {form&&<div className="overlay"><section className="modal" role="dialog" aria-modal="true" aria-label={t('Message reminder','תזכורת להודעה')}><div className="modal-head"><div><div className="eyebrow">{t('A LITTLE PLANNING','קצת תכנון מראש')}</div><h2>{review?t('A final look.','רגע לפני ששומרים.'):t('Prepare your message.','מכינים את ההודעה.')}</h2></div><button aria-label={t('Close','סגירה')} onClick={()=>setForm(null)}><X/></button></div>{error&&<div className="alert">{error}</div>}
+ {review?<><h3>{form.contact_name||form.phone}</h3><p dir="ltr">{form.phone}</p><blockquote dir="auto">{form.body}</blockquote><p>{fmt(form.local_time,form.timezone)} · {form.timezone}</p><div className="file-list">{form.attachments.map(a=><span key={a.path}>{a.name}</span>)}{files.map((f,i)=><span key={i}><FilePreview file={f}/>{f.name}</span>)}</div><p>{form.attachments.length+files.length} {t('files','קבצים')} · {t(form.repeat,{once:'פעם אחת',daily:'יומי',weekly:'שבועי',weekdays:'ימים נבחרים'}[form.repeat])}</p><p className="hint">{t('Google Calendar will remind you. You will open WhatsApp and press Send yourself. No email reminder will be created.','יומן Google יזכיר לך. ההודעה תיפתח ב־WhatsApp, ואת השליחה תבצעו בעצמכם. לא תיווצר תזכורת בדוא״ל.')}</p><div className="modal-actions"><button onClick={()=>setReview(false)}>{t('Back','חזרה')}</button><button disabled={busy} onClick={()=>run(()=>save(false))}>{t('Save draft only','שמירת טיוטה בלבד')}</button><button className="primary" disabled={busy||!clientId()} onClick={()=>run(()=>save(true))}><CalendarDays size={16}/>{t('Save + add to Google Calendar','שמירה והוספה ליומן Google')}</button></div>{!clientId()&&<p className="setup-note">{t('Calendar setup is required. Draft saving works; Calendar reminders are not created yet.','נדרשת הגדרת יומן. אפשר לשמור טיוטה, אך עדיין לא נוצרות תזכורות ביומן.')}</p>}</>:<form onSubmit={e=>{e.preventDefault();run(async()=>{validate({...form,attachments:[...form.attachments,...files]},form.calendar_event_id&&form.repeat!=='once'?0:Date.now());setReview(true)})}}><div className="form-grid"><label>{t('Contact name','שם איש קשר')}<input value={form.contact_name} onChange={e=>setForm({...form,contact_name:e.target.value})}/></label><label>{t('WhatsApp number','מספר WhatsApp')}<input required dir="ltr" placeholder="+972501234567" value={form.phone} onChange={e=>setForm({...form,phone:e.target.value})}/></label></div><label>{t('Message','הודעה')}<textarea dir="auto" rows={4} maxLength={4096} value={form.body} onChange={e=>setForm({...form,body:e.target.value})}/></label><label className="file-input"><Paperclip size={18}/>{t('Add pictures or files','הוספת תמונות או קבצים')}<input type="file" multiple accept="image/jpeg,image/png,application/pdf,video/mp4,audio/mpeg" onChange={e=>{const selected=[...e.target.files];if(selected.length+form.attachments.length>5||selected.some(f=>f.size>16*1024*1024)){setError(t('Up to 5 files, 16 MB each.','עד 5 קבצים, 16 MB לכל קובץ.'));return}setFiles(selected)}}/></label><div className="file-list">{form.attachments.map((a,i)=><span key={a.path}>{a.name}<button type="button" onClick={()=>setForm({...form,attachments:form.attachments.filter((_,n)=>n!==i)})}>×</button></span>)}{files.map((f,i)=><span key={i}><FilePreview file={f}/>{f.name}<button type="button" onClick={()=>setFiles(files.filter((_,n)=>n!==i))}>×</button></span>)}</div><div className="form-grid"><label>{t('Reminder date & time','תאריך ושעת התזכורת')}<input type="datetime-local" required value={form.local_time} onChange={e=>setForm({...form,local_time:e.target.value})}/></label><label>{t('Timezone','אזור זמן')}<select value={form.timezone} onChange={e=>setForm({...form,timezone:e.target.value})}>{['Asia/Jerusalem',...Intl.supportedValuesOf('timeZone').filter(z=>z!=='Asia/Jerusalem')].map(z=><option key={z}>{z}</option>)}</select></label><label>{t('Repeat','חזרתיות')}<select value={form.repeat} onChange={e=>setForm({...form,repeat:e.target.value})}>{[['once','One time','פעם אחת'],['daily','Daily','בכל יום'],['weekly','Weekly','בכל שבוע'],['weekdays','Selected days','ימים נבחרים']].map(([value,en,he])=><option key={value} value={value}>{t(en,he)}</option>)}</select></label><label>{t('Notification','התראה')}<select value={form.reminder_minutes} onChange={e=>setForm({...form,reminder_minutes:Number(e.target.value)})}>{[[0,t('At the scheduled time','במועד שנקבע')],[5,t('5 minutes before','5 דקות לפני')],[15,t('15 minutes before','15 דקות לפני')],[60,t('1 hour before','שעה לפני')]].map(([value,label])=><option value={value} key={value}>{label}</option>)}</select></label>{form.repeat!=='once'&&<label>{t('End date (optional)','תאריך סיום (לא חובה)')}<input type="date" value={form.end_date||''} onChange={e=>setForm({...form,end_date:e.target.value})}/></label>}</div>{form.repeat==='weekdays'&&<div className="weekdays">{['Mon','Tue','Wed','Thu','Fri','Sat','Sun'].map((d,i)=><label key={d}><input type="checkbox" checked={form.weekdays.includes(i+1)} onChange={e=>setForm({...form,weekdays:e.target.checked?[...form.weekdays,i+1]:form.weekdays.filter(x=>x!==i+1)})}/>{t(d,['ב׳','ג׳','ד׳','ה׳','ו׳','ש׳','א׳'][i])}</label>)}</div>}<div className="modal-actions"><button className="primary" disabled={busy}>{t('Review reminder','בדיקת התזכורת')}<ArrowUpRight size={16}/></button></div></form>}</section></div>}
+ {detail&&<div className="overlay"><section className="modal" role="dialog" aria-modal="true" aria-label={t('Ready to send','מוכנים לשליחה')}><div className="modal-head"><h2>{detail.contact_name||detail.phone}</h2><button aria-label={t('Close','סגירה')} onClick={()=>{setDetail(null);history.replaceState(null,'',location.pathname)}}><X/></button></div><p dir="ltr">{detail.phone}</p><blockquote dir="auto">{detail.body||t('Attachment message','הודעה עם קובץ')}</blockquote><div className="send-actions"><a className="primary" href={whatsappUrl(detail)} target="_blank" rel="noopener noreferrer"><MessageCircle size={18}/>{t('Open WhatsApp with this message','פתיחת WhatsApp עם ההודעה')}</a><button onClick={()=>run(async()=>{await navigator.clipboard.writeText(detail.body);setNotice(t('Message copied.','ההודעה הועתקה.'))})}>{t('Copy text','העתקת הטקסט')}</button></div>{detail.attachments.length>0&&<section className="attachment-panel"><h3>{t('Pictures & files','תמונות וקבצים')}</h3><p className="hint">{t('The share sheet lets you choose WhatsApp and a recipient. Photos cannot be attached to a preselected chat by a normal WhatsApp link. If sharing is unavailable, download and attach the file yourself.','בחלון השיתוף בוחרים WhatsApp ונמען. קישור WhatsApp רגיל אינו יכול לצרף תמונה לשיחה שנבחרה מראש. אם השיתוף אינו זמין, הורידו את הקובץ וצרפו אותו בעצמכם.')}</p><button className="primary" disabled={prepared.length!==detail.attachments.length} onClick={()=>run(share)}><Paperclip size={16}/>{t('Share files + text','שיתוף קבצים וטקסט')}</button>{prepared.map((f,i)=><div className="download" key={i}><FilePreview file={f}/><span dir="auto">{f.name}</span><button onClick={()=>download(f)}>{t('Download','הורדה')}</button></div>)}</section>}<p className="hint">{t('Opening WhatsApp does not send or mark anything as sent. Press Send there, then return and mark this reminder done.','פתיחת WhatsApp אינה שולחת או מסמנת הודעה כנשלחה. לחצו שם על שליחה, ואז חזרו וסמנו שהתזכורת בוצעה.')}</p><div className="modal-actions"><button disabled={busy} onClick={()=>run(()=>cancel(detail))}>{t('Cancel reminder','ביטול תזכורת')}</button><button onClick={()=>{setForm({...detail});setFiles([]);setReview(false);setDetail(null)}}>{t('Edit','עריכה')}</button><button className="primary" disabled={busy} onClick={()=>run(async()=>{await patch(detail.id,{last_done_at:new Date().toISOString(),state:detail.repeat==='once'?'done':'pending'});setDetail(null);setNotice(t('Marked by you as sent.','סומן על ידך כנשלח.'))})}><Check size={16}/>{t('I sent it','שלחתי')}</button></div></section></div>}
+ </div>
 }
-createRoot(document.getElementById('root')).render(<App />);
+createRoot(document.getElementById('root')).render(<App/>);

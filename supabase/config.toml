@@ -1,6 +1,0 @@
-[functions.dispatch]
-verify_jwt = false
-[functions.webhook]
-verify_jwt = false
-[functions.local-gateway]
-verify_jwt = false

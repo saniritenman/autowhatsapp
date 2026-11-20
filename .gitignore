@@ -2,14 +2,5 @@ node_modules/
 dist/
 .env*
 !.env.example
-.openai/*.zip
-
-preview.png
-
-**/.wa-session/
-**/.wwebjs_cache/
-
 preview*.png
 publish-bundle.json
-
-**/.local/
